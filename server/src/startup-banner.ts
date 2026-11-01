@@ -92,7 +92,7 @@ function resolveAgentJwtSecretStatus(
 
   return {
     status: "warn",
-    message: "missing (run `pnpm paperclipai onboard`)",
+    message: "missing — using dev fallback (run `pnpm paperclipai onboard` for production)",
   };
 }
 

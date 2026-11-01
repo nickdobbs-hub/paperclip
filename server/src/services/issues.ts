@@ -1581,6 +1581,7 @@ export function issueService(db: Db) {
           status: "todo",
           assigneeAgentId: null,
           checkoutRunId: null,
+          executionRunId: null,
           updatedAt: new Date(),
         })
         .where(eq(issues.id, id))
