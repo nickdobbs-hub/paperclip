@@ -1993,6 +1993,9 @@ function parseYamlScalar(rawValue: string): unknown {
   if (trimmed === "[]") return [];
   if (trimmed === "{}") return {};
   if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
+  if (trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1).replace(/''/g, "'");
+  }
   if (
     trimmed.startsWith("\"") ||
     trimmed.startsWith("[") ||
@@ -2107,7 +2110,7 @@ function parseYamlFrontmatter(raw: string): Record<string, unknown> {
   return isPlainRecord(parsed.value) ? parsed.value : {};
 }
 
-function parseYamlFile(raw: string): Record<string, unknown> {
+export function parseYamlFile(raw: string): Record<string, unknown> {
   return parseYamlFrontmatter(raw);
 }
 
