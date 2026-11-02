@@ -100,9 +100,23 @@ function hasNonEmptyEnvValue(env: Record<string, string>, key: string): boolean 
   return typeof raw === "string" && raw.trim().length > 0;
 }
 
+function isTruthyEnvFlag(env: Record<string, string>, key: string): boolean {
+  const raw = env[key]?.trim().toLowerCase();
+  return raw === "1" || raw === "true";
+}
+
 function resolveClaudeBillingType(env: Record<string, string>): "api" | "subscription" {
   // Claude uses API-key auth when ANTHROPIC_API_KEY is present; otherwise rely on local login/session auth.
-  return hasNonEmptyEnvValue(env, "ANTHROPIC_API_KEY") ? "api" : "subscription";
+  if (hasNonEmptyEnvValue(env, "ANTHROPIC_API_KEY")) return "api";
+  // Vertex AI and Bedrock bill per token through the cloud provider, so their spend counts against budgets.
+  if (isTruthyEnvFlag(env, "CLAUDE_CODE_USE_VERTEX") || isTruthyEnvFlag(env, "CLAUDE_CODE_USE_BEDROCK")) return "api";
+  return "subscription";
+}
+
+function resolveClaudeBiller(env: Record<string, string>): string {
+  if (isTruthyEnvFlag(env, "CLAUDE_CODE_USE_VERTEX")) return "google_vertex";
+  if (isTruthyEnvFlag(env, "CLAUDE_CODE_USE_BEDROCK")) return "aws_bedrock";
+  return "anthropic";
 }
 
 async function buildClaudeRuntimeConfig(input: ClaudeExecutionInput): Promise<ClaudeRuntimeConfig> {
@@ -352,6 +366,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     ),
   );
   const billingType = resolveClaudeBillingType(effectiveEnv);
+  const biller = resolveClaudeBiller(effectiveEnv);
   const skillsDir = await buildSkillsDir(config);
 
   // When instructionsFilePath is configured, create a combined temp file that
@@ -568,7 +583,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       sessionParams: resolvedSessionParams,
       sessionDisplayId: resolvedSessionId,
       provider: "anthropic",
-      biller: "anthropic",
+      biller,
       model: parsedStream.model || asString(parsed.model, model),
       billingType,
       costUsd: parsedStream.costUsd ?? asNumber(parsed.total_cost_usd, 0),
