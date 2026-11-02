@@ -746,6 +746,13 @@ export async function ensureCommandResolvable(command: string, cwd: string, env:
   throw new Error(`Command not found in PATH: "${command}"`);
 }
 
+const SERVER_ONLY_ENV_VARS = [
+  "BETTER_AUTH_SECRET",
+  "PAPERCLIP_SECRETS_MASTER_KEY",
+  "PAPERCLIP_AGENT_JWT_SECRET",
+  "DATABASE_URL",
+] as const;
+
 export async function runChildProcess(
   runId: string,
   command: string,
@@ -778,6 +785,13 @@ export async function runChildProcess(
       "CLAUDE_CODE_PARENT_SESSION",
     ] as const;
     for (const key of CLAUDE_CODE_NESTING_VARS) {
+      delete rawMerged[key];
+    }
+
+    // Never hand the server's own secrets to agent processes: with them an
+    // agent could mint tokens for other agents or decrypt company secrets.
+    // Agents authenticate with the run-scoped PAPERCLIP_API_KEY instead.
+    for (const key of SERVER_ONLY_ENV_VARS) {
       delete rawMerged[key];
     }
 
