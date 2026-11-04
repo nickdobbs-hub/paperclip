@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
   agents,
@@ -618,6 +618,39 @@ export function routineService(db: Db, deps: { heartbeat?: IssueAssignmentWakeup
       .then((rows) => rows[0]?.issues ?? null);
   }
 
+  // An open execution issue still pointing at a finished or missing run holds
+  // issues_open_routine_execution_uq without being "live", which would make every
+  // later dispatch fail. Clear those locks, matching heartbeat's stale-lock handling.
+  async function releaseStaleExecutionLocks(routine: typeof routines.$inferSelect, executor: Db = db) {
+    const staleIssueIds = await executor
+      .select({ id: issues.id })
+      .from(issues)
+      .leftJoin(heartbeatRuns, eq(heartbeatRuns.id, issues.executionRunId))
+      .where(
+        and(
+          eq(issues.companyId, routine.companyId),
+          eq(issues.originKind, "routine_execution"),
+          eq(issues.originId, routine.id),
+          inArray(issues.status, OPEN_ISSUE_STATUSES),
+          isNull(issues.hiddenAt),
+          isNotNull(issues.executionRunId),
+          or(isNull(heartbeatRuns.id), notInArray(heartbeatRuns.status, LIVE_HEARTBEAT_RUN_STATUSES)),
+        ),
+      )
+      .then((rows) => rows.map((row) => row.id));
+    if (staleIssueIds.length === 0) return;
+
+    await executor
+      .update(issues)
+      .set({
+        executionRunId: null,
+        executionAgentNameKey: null,
+        executionLockedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(inArray(issues.id, staleIssueIds));
+  }
+
   async function finalizeRun(runId: string, patch: Partial<typeof routineRuns.$inferInsert>, executor: Db = db) {
     return executor
       .update(routineRuns)
@@ -721,6 +754,9 @@ export function routineService(db: Db, deps: { heartbeat?: IssueAssignmentWakeup
 
       let createdIssue: Awaited<ReturnType<typeof issueSvc.create>> | null = null;
       try {
+        // Commit the release outside the dispatch transaction: issueSvc.create inserts on
+        // its own connection and would block on an uncommitted update of the same index.
+        await releaseStaleExecutionLocks(input.routine, db);
         const activeIssue = await findLiveExecutionIssue(input.routine, txDb);
         if (activeIssue && input.routine.concurrencyPolicy !== "always_enqueue") {
           const status = input.routine.concurrencyPolicy === "skip_if_active" ? "skipped" : "coalesced";
