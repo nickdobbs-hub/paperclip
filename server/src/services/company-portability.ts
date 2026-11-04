@@ -52,6 +52,7 @@ import { accessService } from "./access.js";
 import { agentService } from "./agents.js";
 import { agentInstructionsService } from "./agent-instructions.js";
 import { assetService } from "./assets.js";
+import { budgetService } from "./budgets.js";
 import { generateReadme } from "./company-export-readme.js";
 import { renderOrgChartPng, type OrgNode } from "../routes/org-chart-svg.js";
 import { companySkillService } from "./company-skills.js";
@@ -2670,6 +2671,7 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
   const assetRecords = assetService(db);
   const instructions = agentInstructionsService();
   const access = accessService(db);
+  const budgets = budgetService(db);
   const projects = projectService(db);
   const issues = issueService(db);
   const companySkills = companySkillService(db);
@@ -3988,6 +3990,21 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
           metadata: manifestAgent.metadata,
         };
 
+        // Budgets are only enforced through budget_policies, so mirror the create-agent route.
+        const upsertImportedAgentBudgetPolicy = async (agentId: string) => {
+          if (manifestAgent.budgetMonthlyCents <= 0) return;
+          await budgets.upsertPolicy(
+            targetCompany.id,
+            {
+              scopeType: "agent",
+              scopeId: agentId,
+              amount: manifestAgent.budgetMonthlyCents,
+              windowKind: "calendar_month_utc",
+            },
+            actorUserId ?? null,
+          );
+        };
+
         if (planAgent.action === "update" && planAgent.existingAgentId) {
           let updated = await agents.update(planAgent.existingAgentId, patch);
           if (!updated) {
@@ -4001,6 +4018,7 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
             });
             continue;
           }
+          await upsertImportedAgentBudgetPolicy(updated.id);
           try {
             const materialized = await instructions.materializeManagedBundle(updated, bundleFiles, {
               clearLegacyPromptTemplate: true,
@@ -4032,6 +4050,7 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
           true,
           actorUserId ?? null,
         );
+        await upsertImportedAgentBudgetPolicy(created.id);
         try {
           const materialized = await instructions.materializeManagedBundle(created, bundleFiles, {
             clearLegacyPromptTemplate: true,

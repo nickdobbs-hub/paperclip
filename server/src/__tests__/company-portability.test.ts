@@ -64,6 +64,10 @@ const agentInstructionsSvc = {
   materializeManagedBundle: vi.fn(),
 };
 
+const budgetSvc = {
+  upsertPolicy: vi.fn(),
+};
+
 vi.mock("../services/companies.js", () => ({
   companyService: () => companySvc,
 }));
@@ -98,6 +102,10 @@ vi.mock("../services/assets.js", () => ({
 
 vi.mock("../services/agent-instructions.js", () => ({
   agentInstructionsService: () => agentInstructionsSvc,
+}));
+
+vi.mock("../services/budgets.js", () => ({
+  budgetService: () => budgetSvc,
 }));
 
 vi.mock("../routes/org-chart-svg.js", () => ({
@@ -1945,6 +1953,123 @@ describe("company portability", () => {
         },
       },
     });
+  });
+
+  it("creates an agent budget policy for imported agents with a monthly budget", async () => {
+    const portability = companyPortabilityService({} as any);
+    const [claudeCoder, cmo] = await agentSvc.list();
+    agentSvc.list.mockResolvedValue([{ ...claudeCoder, budgetMonthlyCents: 5000 }, cmo]);
+
+    companySvc.create.mockResolvedValue({
+      id: "company-imported",
+      name: "Imported Paperclip",
+    });
+    agentSvc.create.mockImplementation(async (_companyId: string, input: Record<string, unknown>) => ({
+      id: `agent-${String(input.name).toLowerCase()}`,
+      name: input.name,
+      adapterConfig: input.adapterConfig,
+      runtimeConfig: input.runtimeConfig,
+      budgetMonthlyCents: input.budgetMonthlyCents,
+    }));
+
+    const exported = await portability.exportBundle("company-1", {
+      include: {
+        company: true,
+        agents: true,
+        projects: false,
+        issues: false,
+      },
+    });
+
+    agentSvc.list.mockResolvedValue([]);
+
+    await portability.importBundle({
+      source: {
+        type: "inline",
+        rootPath: exported.rootPath,
+        files: exported.files,
+      },
+      include: {
+        company: true,
+        agents: true,
+        projects: false,
+        issues: false,
+      },
+      target: {
+        mode: "new_company",
+        newCompanyName: "Imported Paperclip",
+      },
+      agents: "all",
+      collisionStrategy: "rename",
+    }, "user-1");
+
+    expect(budgetSvc.upsertPolicy).toHaveBeenCalledTimes(1);
+    expect(budgetSvc.upsertPolicy).toHaveBeenCalledWith(
+      "company-imported",
+      {
+        scopeType: "agent",
+        scopeId: "agent-claudecoder",
+        amount: 5000,
+        windowKind: "calendar_month_utc",
+      },
+      "user-1",
+    );
+  });
+
+  it("updates the agent budget policy when import replaces an existing agent", async () => {
+    const portability = companyPortabilityService({} as any);
+    const [claudeCoder, cmo] = await agentSvc.list();
+    agentSvc.list.mockResolvedValue([{ ...claudeCoder, budgetMonthlyCents: 7500 }, cmo]);
+
+    const exported = await portability.exportBundle("company-1", {
+      include: {
+        company: false,
+        agents: true,
+        projects: false,
+        issues: false,
+      },
+    });
+
+    agentSvc.update.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({
+      id,
+      name: id === "agent-1" ? "ClaudeCoder" : "CMO",
+      adapterConfig: patch.adapterConfig ?? {},
+      runtimeConfig: patch.runtimeConfig ?? {},
+      budgetMonthlyCents: patch.budgetMonthlyCents ?? 0,
+    }));
+
+    await portability.importBundle({
+      source: {
+        type: "inline",
+        rootPath: exported.rootPath,
+        files: exported.files,
+      },
+      include: {
+        company: false,
+        agents: true,
+        projects: false,
+        issues: false,
+      },
+      target: {
+        mode: "existing_company",
+        companyId: "company-1",
+      },
+      agents: "all",
+      collisionStrategy: "replace",
+    }, "user-1");
+
+    expect(agentSvc.create).not.toHaveBeenCalled();
+    expect(budgetSvc.upsertPolicy).toHaveBeenCalledTimes(1);
+    expect(budgetSvc.upsertPolicy).toHaveBeenCalledWith(
+      "company-1",
+      {
+        scopeType: "agent",
+        scopeId: "agent-1",
+        amount: 7500,
+        windowKind: "calendar_month_utc",
+      },
+      "user-1",
+    );
   });
 
   it("imports only selected files and leaves unchecked company metadata alone", async () => {
