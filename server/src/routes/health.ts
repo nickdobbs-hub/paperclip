@@ -88,6 +88,8 @@ export function healthRoutes(
     res.json({
       status: "ok",
       version: serverVersion,
+      // Commit of the running build, set by the image; lets a deployer confirm what is live.
+      commit: process.env.PAPERCLIP_COMMIT_SHA || null,
       deploymentMode: opts.deploymentMode,
       deploymentExposure: opts.deploymentExposure,
       authReady: opts.authReady,
