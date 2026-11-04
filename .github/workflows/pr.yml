@@ -4,6 +4,8 @@ on:
   pull_request:
     branches:
       - master
+      # CX production branch: the deployer ships its tip (see cx-deploy-gate.yml).
+      - cx/local-docker
 
 concurrency:
   group: pr-${{ github.event.pull_request.number }}

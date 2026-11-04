@@ -1,0 +1,44 @@
+name: CX Deploy Gate
+
+# Runs the full check on every commit that lands on the CX production branch.
+# The host-side deployer only ships a commit whose deploy-gate run succeeded.
+on:
+  push:
+    branches:
+      - cx/local-docker
+
+concurrency:
+  group: cx-deploy-gate-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Run tests
+        run: pnpm test:run
+
+      - name: Build
+        run: pnpm build
