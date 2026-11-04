@@ -255,6 +255,44 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     expect(issue?.checkoutRunId).toBe(runId);
   });
 
+  it("releases every issue the finished run holds an execution lock on", async () => {
+    const { companyId, agentId, runId, issueId } = await seedRunFixture({
+      processPid: 999_999_999,
+      processLossRetryCount: 1,
+    });
+    const checkedOutIssueId = randomUUID();
+    const issuePrefix = await db
+      .select({ issuePrefix: companies.issuePrefix })
+      .from(companies)
+      .where(eq(companies.id, companyId))
+      .then((rows) => rows[0]!.issuePrefix);
+    await db.insert(issues).values({
+      id: checkedOutIssueId,
+      companyId,
+      title: "Issue the run checked out mid-flight",
+      status: "in_progress",
+      priority: "medium",
+      assigneeAgentId: agentId,
+      checkoutRunId: runId,
+      executionRunId: runId,
+      issueNumber: 2,
+      identifier: `${issuePrefix}-2`,
+    });
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.reapOrphanedRuns();
+    expect(result.runIds).toEqual([runId]);
+
+    const lockedIssues = await db
+      .select({ id: issues.id, executionRunId: issues.executionRunId })
+      .from(issues)
+      .where(eq(issues.companyId, companyId));
+    expect(lockedIssues.map((issue) => issue.id).sort()).toEqual([issueId, checkedOutIssueId].sort());
+    for (const issue of lockedIssues) {
+      expect(issue.executionRunId).toBeNull();
+    }
+  });
+
   it("clears the detached warning when the run reports activity again", async () => {
     const { runId } = await seedRunFixture({
       includeIssue: false,
