@@ -13,6 +13,7 @@ describe("GET /health", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("returns 200 with status ok", async () => {
@@ -35,6 +36,32 @@ describe("GET /health", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ status: "ok", version: serverVersion });
+  });
+
+  it("reports the running commit from PAPERCLIP_COMMIT_SHA", async () => {
+    vi.stubEnv("PAPERCLIP_COMMIT_SHA", "abc123");
+    const db = {
+      execute: vi.fn().mockResolvedValue([{ "?column?": 1 }]),
+    } as unknown as Db;
+    const app = express();
+    app.use("/health", healthRoutes(db));
+
+    const res = await request(app).get("/health");
+
+    expect(res.body.commit).toBe("abc123");
+  });
+
+  it("reports a null commit when PAPERCLIP_COMMIT_SHA is unset", async () => {
+    vi.stubEnv("PAPERCLIP_COMMIT_SHA", "");
+    const db = {
+      execute: vi.fn().mockResolvedValue([{ "?column?": 1 }]),
+    } as unknown as Db;
+    const app = express();
+    app.use("/health", healthRoutes(db));
+
+    const res = await request(app).get("/health");
+
+    expect(res.body.commit).toBeNull();
   });
 
   it("returns 503 when the database probe fails", async () => {
