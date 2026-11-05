@@ -1,0 +1,20 @@
+{
+  "name": "@paperclipai/plugin-rocketlane-sync",
+  "version": "0.1.0",
+  "description": "Shadow-mode plugin that validates work-item documents and builds Rocketlane task payloads",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js"
+  },
+  "scripts": {
+    "prebuild": "node ../../../../scripts/ensure-plugin-build-deps.mjs",
+    "build": "node ../../../../scripts/build-plugin.mjs",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  }
+}
