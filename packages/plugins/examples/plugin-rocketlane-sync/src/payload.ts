@@ -193,12 +193,12 @@ function parseValue(value: string): any {
   if (trimmed === "true") return true;
   if (trimmed === "false") return false;
 
-  // quoted string - preserve the quotes
+  // quoted string - strip surrounding quotes
   if (
     (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
     (trimmed.startsWith("'") && trimmed.endsWith("'"))
   ) {
-    return trimmed;
+    return trimmed.slice(1, -1);
   }
 
   // unquoted string (strip inline comments, but not URL fragments)

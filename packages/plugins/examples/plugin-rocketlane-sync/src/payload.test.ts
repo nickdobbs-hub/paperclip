@@ -15,11 +15,11 @@ describe("parseWorkItemDoc", () => {
 account: Acme Industries
 owner_side: cyberhaven
 cx_role: analyst
-owner_person: nick.dobbs@cyberhaven.com
+owner_person: pat.lee@example.com
 due: 2026-11-13
 source: call
 source_link: https://mail.google.com/mail/u/0/#inbox/abc123
-source_quote: "Nicholas Dobbs to provide list of active Cyberhaven agents"
+source_quote: "Pat Lee to provide list of active agents for fleet comparison"
 origin_call: call:event-12345
 notes_reviewed: false
 progress_log:
@@ -40,14 +40,14 @@ Some other content.
     expect(doc.account).toBe("Acme Industries");
     expect(doc.owner_side).toBe("cyberhaven");
     expect(doc.cx_role).toBe("analyst");
-    expect(doc.owner_person).toBe("nick.dobbs@cyberhaven.com");
+    expect(doc.owner_person).toBe("pat.lee@example.com");
     expect(doc.due).toBe("2026-11-13");
     expect(doc.source).toBe("call");
     expect(doc.source_link).toBe(
       "https://mail.google.com/mail/u/0/#inbox/abc123"
     );
     expect(doc.source_quote).toBe(
-      '"Nicholas Dobbs to provide list of active Cyberhaven agents"'
+      "Pat Lee to provide list of active agents for fleet comparison"
     );
     expect(doc.origin_call).toBe("call:event-12345");
     expect(doc.notes_reviewed).toBe(false);
@@ -59,6 +59,30 @@ Some other content.
       task_id: null,
       synced_at: null,
     });
+  });
+
+  it("strips quotes from quoted string values", () => {
+    const markdown = `
+\`\`\`yaml
+account: Acme Industries
+owner_side: cyberhaven
+cx_role: analyst
+owner_person: pat.lee@example.com
+due: 2026-11-13
+source: call
+source_link: "https://mail.google.com/mail/u/0/#inbox/quoted"
+source_quote: 'Single quoted string value'
+origin_call: call:event-12345
+notes_reviewed: false
+\`\`\`
+`;
+
+    const result = parseWorkItemDoc(markdown);
+    expect(result).not.toHaveProperty("errors");
+
+    const doc = result as WorkItemDoc;
+    expect(doc.source_link).toBe("https://mail.google.com/mail/u/0/#inbox/quoted");
+    expect(doc.source_quote).toBe("Single quoted string value");
   });
 
   it("returns error when no yaml block is found", () => {
@@ -116,7 +140,7 @@ notes_reviewed: true
 account: Acme Industries
 owner_side: cyberhaven
 cx_role: analyst
-owner_person: nick.dobbs@cyberhaven.com
+owner_person: pat.lee@example.com
 due: null
 source: call
 source_link: https://example.com
@@ -136,7 +160,7 @@ notes_reviewed: false
 account: Acme Industries  # customer name
 owner_side: cyberhaven
 cx_role: analyst
-owner_person: nick.dobbs@cyberhaven.com
+owner_person: pat.lee@example.com
 due: null
 source: call
 source_link: https://example.com
@@ -159,7 +183,7 @@ describe("buildTaskPayload", () => {
     account: "Acme Industries",
     owner_side: "cyberhaven",
     cx_role: "analyst",
-    owner_person: "nick.dobbs@cyberhaven.com",
+    owner_person: "pat.lee@example.com",
     due: "2026-11-13",
     source: "call",
     source_link: "https://mail.google.com/test",
@@ -290,7 +314,7 @@ describe("buildTaskPayload", () => {
     expect(p.externalReferenceId).toBe("CYBAA-100");
     expect(p.taskName).toBe("Send config snippet to Acme");
     expect(p.dueDate).toBe("2026-11-13");
-    expect(p.assignee).toBe("nick.dobbs@cyberhaven.com");
+    expect(p.assignee).toBe("pat.lee@example.com");
     expect(p.fields.Source).toBe("call");
     expect(p.fields["Source link"]).toBe("https://mail.google.com/test");
     expect(p.fields["CX role"]).toBe("analyst");

@@ -60,7 +60,7 @@ describe("rocketlane-sync worker", () => {
 account: Acme Industries
 owner_side: cyberhaven
 cx_role: analyst
-owner_person: nick.dobbs@cyberhaven.com
+owner_person: pat.lee@example.com
 due: 2026-11-15
 source: call
 source_link: https://mail.google.com/test
