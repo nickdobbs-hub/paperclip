@@ -287,4 +287,81 @@ notes_reviewed: false
     // Assert zero fetch calls throughout the entire test suite
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it("creates shadow report issue when job runs", async () => {
+    const companyId = "test-company-123";
+    const invalidIssueId = "test-issue-invalid-job";
+    const validIssueId = "test-issue-valid-job";
+
+    // Seed test data with one invalid and one valid work-item
+    harness.seed({
+      companies: [{ id: companyId, name: "Test Company" } as any],
+      issues: [
+        {
+          id: invalidIssueId,
+          companyId,
+          identifier: "TEST-600",
+          title: "Invalid work-item",
+          status: "todo",
+          labels: [{ id: "label-1", name: "work-item" }],
+        } as any,
+        {
+          id: validIssueId,
+          companyId,
+          identifier: "TEST-601",
+          title: "Valid work-item",
+          status: "todo",
+          labels: [{ id: "label-1", name: "work-item" }],
+        } as any,
+      ],
+    });
+
+    // Create invalid entity
+    await harness.ctx.entities.upsert({
+      entityType: "rocketlane-task",
+      scopeKind: "issue",
+      scopeId: invalidIssueId,
+      externalId: undefined,
+      data: {
+        state: "invalid",
+        errors: ["missing required field: cx_role"],
+        builtAt: new Date().toISOString(),
+        companyId,
+      },
+    });
+
+    // Create valid entity
+    await harness.ctx.entities.upsert({
+      entityType: "rocketlane-task",
+      scopeKind: "issue",
+      scopeId: validIssueId,
+      externalId: undefined,
+      data: {
+        state: "shadow",
+        payload: { taskName: "Test task" },
+        builtAt: new Date().toISOString(),
+        companyId,
+      },
+    });
+
+    // Count issues before job runs
+    const issuesBefore = await harness.ctx.issues.list({ companyId });
+    const countBefore = issuesBefore.length;
+
+    // Run the shadow-report job
+    await harness.runJob("shadow-report");
+
+    // Check that exactly one new issue was created
+    const issuesAfter = await harness.ctx.issues.list({ companyId });
+    expect(issuesAfter.length).toBe(countBefore + 1);
+
+    // Find the shadow report issue (should be the last one created)
+    const reportIssue = issuesAfter.find(i => i.title === "Rocketlane Shadow Report");
+    expect(reportIssue).toBeDefined();
+    expect(reportIssue!.companyId).toBe(companyId);
+    expect(reportIssue!.status).toBe("todo");
+    expect(reportIssue!.description).toContain("**Valid payloads:** 1");
+    expect(reportIssue!.description).toContain("**Invalid items:** 1");
+    expect(reportIssue!.description).toContain("missing required field: cx_role");
+  });
 });

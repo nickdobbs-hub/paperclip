@@ -51,6 +51,7 @@ async function processWorkItem(ctx: PluginContext, issueId: string, companyId: s
           state: "invalid",
           errors: ["no work-item document found"],
           builtAt: new Date().toISOString(),
+          companyId,
         },
       });
       return;
@@ -69,6 +70,7 @@ async function processWorkItem(ctx: PluginContext, issueId: string, companyId: s
           state: "invalid",
           errors: parsed.errors,
           builtAt: new Date().toISOString(),
+          companyId,
         },
       });
       return;
@@ -117,6 +119,7 @@ async function processWorkItem(ctx: PluginContext, issueId: string, companyId: s
           state: "invalid",
           errors: payload.errors,
           builtAt: new Date().toISOString(),
+          companyId,
         },
       });
       return;
@@ -132,6 +135,7 @@ async function processWorkItem(ctx: PluginContext, issueId: string, companyId: s
         state: "shadow",
         payload,
         builtAt: new Date().toISOString(),
+        companyId,
       },
     });
 
@@ -174,11 +178,6 @@ function createShadowReportHandler(ctx: PluginContext) {
 
       if (invalid.length > 0) {
         report += "## Invalid Items\n\n";
-        // For the report, we need a companyId - we'll use the first entity's company
-        // or fall back to a well-known company if needed
-        // Since entities are scoped to issues, we need to get one issue to find the companyId
-        // For now, we'll create a simple report without fetching individual issues
-        // A production version would track companyId in entity data
         for (const entity of invalid) {
           const errors = (entity.data as any)?.errors || [];
           report += `- Issue ${entity.scopeId}\n`;
@@ -188,13 +187,22 @@ function createShadowReportHandler(ctx: PluginContext) {
         }
       }
 
-      ctx.logger.info(`Shadow report would be created: ${valid.length} valid, ${invalid.length} invalid`);
-      ctx.logger.info(`Job ${job.jobKey} run ${job.runId} completed (trigger: ${job.trigger})`);
+      // Get companyId from the first entity (they should all be from the same company)
+      const companyId = allEntities.length > 0 ? (allEntities[0].data as any)?.companyId : undefined;
 
-      // Note: Creating the actual issue requires companyId
-      // In a real implementation, we'd track this in the entity data or plugin state
-      // For now, just log the report
-      ctx.logger.info(report);
+      if (companyId) {
+        // Create an issue with the shadow report
+        await ctx.issues.create({
+          companyId,
+          title: "Rocketlane Shadow Report",
+          description: report,
+        });
+        ctx.logger.info(`Shadow report issue created: ${valid.length} valid, ${invalid.length} invalid`);
+      } else {
+        ctx.logger.warn("No entities found or missing companyId, skipping report issue creation");
+      }
+
+      ctx.logger.info(`Job ${job.jobKey} run ${job.runId} completed (trigger: ${job.trigger})`);
     } catch (error) {
       ctx.logger.error("Error running shadow report:", error as Record<string, unknown>);
     }

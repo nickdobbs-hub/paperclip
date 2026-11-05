@@ -8,6 +8,8 @@
     "skipLibCheck": true,
     "outDir": "dist",
     "lib": ["ES2023"],
+    "types": ["node"],
+    "typeRoots": ["../../sdk/node_modules/@types"],
     "paths": {
       "@paperclipai/plugin-sdk": ["../../sdk/src/index.ts"],
       "@paperclipai/plugin-sdk/testing": ["../../sdk/src/testing.ts"]

@@ -19,12 +19,23 @@ const manifest = {
     "events.subscribe" as const,
     "jobs.schedule" as const,
     "issues.read" as const,
+    "issues.create" as const,
     "issue.documents.read" as const,
     "issue.comments.read" as const,
+    "plugin.state.read" as const,
+    "plugin.state.write" as const,
   ],
   entrypoints: {
     worker: "./dist/worker.js" as const,
   },
+  jobs: [
+    {
+      jobKey: "shadow-report" as const,
+      displayName: "Shadow Report",
+      description: "Weekly report of valid and invalid work-item payloads",
+      schedule: "0 0 * * 0",
+    },
+  ],
 };
 
 export default manifest;
