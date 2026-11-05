@@ -205,6 +205,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
   const pendingExternalValueRef = useRef<string | null>(null);
   const isFocusedRef = useRef(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  // MDXEditor renders markdown it cannot parse (e.g. a bare `<date>`) as an empty document,
+  // and saving that would wipe the text, so we switch to a raw textarea instead.
+  const [parseError, setParseError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const dragDepthRef = useRef(0);
 
@@ -487,6 +490,29 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
 
   const canDropImage = Boolean(imageUploadHandler);
 
+  if (parseError !== null) {
+    return (
+      <div
+        className={cn(
+          "relative",
+          bordered ? "rounded-md border border-border bg-transparent" : "bg-transparent",
+          className,
+        )}
+      >
+        <p className="px-3 pt-2 text-xs text-destructive">
+          Showing raw text: this markdown can't be loaded in the rich editor ({parseError}).
+        </p>
+        <textarea
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onBlur={() => onBlur?.()}
+          placeholder={placeholder}
+          className={cn("w-full bg-transparent px-3 py-2 outline-none", contentClassName)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       ref={containerRef}
@@ -596,6 +622,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
           onChange(next);
         }}
         onBlur={() => onBlur?.()}
+        onError={({ error }) => setParseError(error)}
         className={cn("paperclip-mdxeditor", !bordered && "paperclip-mdxeditor--borderless")}
         contentEditableClassName={cn(
           "paperclip-mdxeditor-content focus:outline-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:list-item",
