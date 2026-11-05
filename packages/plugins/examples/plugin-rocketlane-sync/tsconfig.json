@@ -9,7 +9,8 @@
     "outDir": "dist",
     "lib": ["ES2023"],
     "paths": {
-      "@paperclipai/plugin-sdk": ["../../sdk/src/index.ts"]
+      "@paperclipai/plugin-sdk": ["../../sdk/src/index.ts"],
+      "@paperclipai/plugin-sdk/testing": ["../../sdk/src/testing.ts"]
     },
     "baseUrl": ".",
     "forceConsistentCasingInFileNames": true,

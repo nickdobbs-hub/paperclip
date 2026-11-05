@@ -14,8 +14,10 @@ const manifest = {
   description:
     "Shadow-mode plugin that validates work-item documents and builds Rocketlane task payloads",
   author: "Paperclip",
-  categories: ["integration" as const],
+  categories: ["connector" as const],
   capabilities: [
+    "events.subscribe" as const,
+    "jobs.schedule" as const,
     "issues.read" as const,
     "issue.documents.read" as const,
     "issue.comments.read" as const,

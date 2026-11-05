@@ -1,54 +1,290 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
+import type { TestHarness } from "@paperclipai/plugin-sdk/testing";
+import plugin from "./worker.js";
+import manifest from "./manifest.js";
 
 describe("rocketlane-sync worker", () => {
-  // Mock fetch to ensure no network calls
+  let harness: TestHarness;
   const originalFetch = globalThis.fetch;
   const fetchSpy = vi.fn();
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Mock fetch to ensure no network calls
     globalThis.fetch = fetchSpy;
     fetchSpy.mockClear();
+
+    // Create test harness with plugin manifest
+    harness = createTestHarness({
+      manifest,
+      capabilities: manifest.capabilities,
+    });
+
+    // Run plugin setup
+    await plugin.definition.setup(harness.ctx);
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 
-  it("makes zero fetch calls", async () => {
-    // Import the worker (which would normally run setup)
-    // Since we can't actually run the plugin in a test without the harness,
-    // we just verify that importing the module doesn't call fetch
-    await import("./worker.js");
-
+  it("makes zero fetch calls during setup", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("validates that no fetch is available in worker scope", () => {
-    // This test documents the contract: the worker must not use fetch
-    // The actual enforcement happens in the plugin runtime
+  it("creates shadow entity for valid work-item issue", async () => {
+    const companyId = "test-company-123";
+    const issueId = "test-issue-456";
 
-    // Verify our spy is in place
-    expect(typeof globalThis.fetch).toBe("function");
+    // Seed test data
+    harness.seed({
+      companies: [{ id: companyId, name: "Test Company" } as any],
+      issues: [
+        {
+          id: issueId,
+          companyId,
+          identifier: "TEST-100",
+          title: "Send config to Acme",
+          status: "todo",
+          labels: [{ id: "label-1", name: "work-item" }],
+        } as any,
+      ],
+      issueComments: [],
+    });
+
+    // Create a work-item document with minimal valid content
+    const workItemBody = `
+# Work Item
+
+\`\`\`yaml
+account: Acme Industries
+owner_side: cyberhaven
+cx_role: analyst
+owner_person: nick.dobbs@cyberhaven.com
+due: 2026-11-15
+source: call
+source_link: https://mail.google.com/test
+source_quote: "Send config snippet to Acme"
+origin_call: call:event-123
+notes_reviewed: false
+\`\`\`
+`;
+
+    // Mock the document read
+    const originalGet = harness.ctx.issues.documents.get;
+    harness.ctx.issues.documents.get = vi.fn(async () => ({
+      id: "doc-1",
+      key: "work-item",
+      body: workItemBody,
+      format: "markdown",
+    })) as any;
+
+    // Emit issue.updated event
+    await harness.emit("issue.updated", { issueId, companyId }, {
+      entityId: issueId,
+      companyId,
+    });
+
+    // Restore original
+    harness.ctx.issues.documents.get = originalGet;
+
+    // Check that entity was created with state: "shadow"
+    const entities = await harness.ctx.entities.list({ entityType: "rocketlane-task" });
+    expect(entities).toHaveLength(1);
+    expect(entities[0].scopeId).toBe(issueId);
+    expect((entities[0].data as any).state).toBe("shadow");
+    expect((entities[0].data as any).payload).toBeDefined();
+    expect((entities[0].data as any).payload.externalReferenceId).toBe("TEST-100");
+
+    // Verify no fetch calls
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
 
-    // If the worker tried to call fetch, this spy would catch it
-    try {
-      globalThis.fetch("https://example.com");
-    } catch {
-      // Expected to fail in test env, but the spy call count is what matters
-    }
+  it("creates no entity for non-work-item issue", async () => {
+    const companyId = "test-company-123";
+    const issueId = "test-issue-789";
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    fetchSpy.mockClear();
+    // Seed test data with issue that has NO work-item label
+    harness.seed({
+      companies: [{ id: companyId, name: "Test Company" } as any],
+      issues: [
+        {
+          id: issueId,
+          companyId,
+          identifier: "TEST-200",
+          title: "Regular issue without work-item label",
+          status: "todo",
+          labels: [], // No work-item label
+        } as any,
+      ],
+    });
+
+    // Emit issue.updated event
+    await harness.emit("issue.updated", { issueId, companyId }, {
+      entityId: issueId,
+      companyId,
+    });
+
+    // Check that NO entity was created
+    const entities = await harness.ctx.entities.list({ entityType: "rocketlane-task" });
+    expect(entities).toHaveLength(0);
+
+    // Verify no fetch calls
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("creates invalid entity for issue with invalid work-item document", async () => {
+    const companyId = "test-company-123";
+    const issueId = "test-issue-999";
+
+    // Seed test data
+    harness.seed({
+      companies: [{ id: companyId, name: "Test Company" } as any],
+      issues: [
+        {
+          id: issueId,
+          companyId,
+          identifier: "TEST-300",
+          title: "Issue with invalid work-item doc",
+          status: "todo",
+          labels: [{ id: "label-1", name: "work-item" }],
+        } as any,
+      ],
+      issueComments: [],
+    });
+
+    // Create an INVALID work-item document (missing required fields)
+    const invalidWorkItemBody = `
+# Work Item
+
+\`\`\`yaml
+account: Acme Industries
+owner_side: cyberhaven
+\`\`\`
+`;
+
+    // Mock the document read
+    const originalGet = harness.ctx.issues.documents.get;
+    harness.ctx.issues.documents.get = vi.fn(async () => ({
+      id: "doc-2",
+      key: "work-item",
+      body: invalidWorkItemBody,
+      format: "markdown",
+    })) as any;
+
+    // Emit issue.updated event
+    await harness.emit("issue.updated", { issueId, companyId }, {
+      entityId: issueId,
+      companyId,
+    });
+
+    // Restore original
+    harness.ctx.issues.documents.get = originalGet;
+
+    // Check that entity was created with state: "invalid"
+    const entities = await harness.ctx.entities.list({ entityType: "rocketlane-task" });
+    expect(entities).toHaveLength(1);
+    expect(entities[0].scopeId).toBe(issueId);
+    expect((entities[0].data as any).state).toBe("invalid");
+    expect((entities[0].data as any).errors).toBeDefined();
+    expect((entities[0].data as any).errors.length).toBeGreaterThan(0);
+
+    // Verify no fetch calls
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("creates invalid entity when work-item document is missing", async () => {
+    const companyId = "test-company-123";
+    const issueId = "test-issue-111";
+
+    // Seed test data
+    harness.seed({
+      companies: [{ id: companyId, name: "Test Company" } as any],
+      issues: [
+        {
+          id: issueId,
+          companyId,
+          identifier: "TEST-400",
+          title: "Issue with no work-item doc",
+          status: "todo",
+          labels: [{ id: "label-1", name: "work-item" }],
+        } as any,
+      ],
+    });
+
+    // Mock the document read to return null (no document)
+    const originalGet = harness.ctx.issues.documents.get;
+    harness.ctx.issues.documents.get = vi.fn(async () => null) as any;
+
+    // Emit issue.updated event
+    await harness.emit("issue.updated", { issueId, companyId }, {
+      entityId: issueId,
+      companyId,
+    });
+
+    // Restore original
+    harness.ctx.issues.documents.get = originalGet;
+
+    // Check that entity was created with state: "invalid"
+    const entities = await harness.ctx.entities.list({ entityType: "rocketlane-task" });
+    expect(entities).toHaveLength(1);
+    expect((entities[0].data as any).state).toBe("invalid");
+    expect((entities[0].data as any).errors).toContain("no work-item document found");
+
+    // Verify no fetch calls
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("validates that worker never calls fetch", async () => {
+    const companyId = "test-company-123";
+    const issueId = "test-issue-fetch";
+
+    harness.seed({
+      companies: [{ id: companyId, name: "Test Company" } as any],
+      issues: [
+        {
+          id: issueId,
+          companyId,
+          identifier: "TEST-500",
+          title: "Fetch test issue",
+          status: "todo",
+          labels: [{ id: "label-1", name: "work-item" }],
+        } as any,
+      ],
+      issueComments: [],
+    });
+
+    const workItemBody = `
+\`\`\`yaml
+account: Acme Industries
+owner_side: cyberhaven
+cx_role: analyst
+owner_person: test@example.com
+due: null
+source: call
+source_link: https://example.com
+source_quote: "Test"
+origin_call: call:test
+notes_reviewed: false
+\`\`\`
+`;
+
+    const originalGet = harness.ctx.issues.documents.get;
+    harness.ctx.issues.documents.get = vi.fn(async () => ({
+      id: "doc-3",
+      key: "work-item",
+      body: workItemBody,
+      format: "markdown",
+    })) as any;
+
+    await harness.emit("issue.updated", { issueId, companyId }, {
+      entityId: issueId,
+      companyId,
+    });
+
+    harness.ctx.issues.documents.get = originalGet;
+
+    // Assert zero fetch calls throughout the entire test suite
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
-
-// Note: Full integration tests with the SDK harness would be added here
-// following the pattern from Task 10 Step 1:
-//
-// - harness.emit("issue.updated", { issue with work-item label }) → one entity with state: "shadow"
-// - harness.emit("issue.updated", { issue without work-item label }) → no entity
-// - harness.emit("issue.updated", { issue with invalid document }) → entity with state: "invalid"
-//
-// These would use the actual plugin SDK test harness once the SDK is bundled
-// into the worker. For now, we verify the zero-fetch contract.
