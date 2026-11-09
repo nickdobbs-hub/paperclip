@@ -28,10 +28,18 @@ import {
   detectClaudeLoginRequired,
   isClaudeMaxTurnsResult,
   isClaudeUnknownSessionError,
+  isClaudeOrgVerificationError,
 } from "./parse.js";
 import { resolveClaudeDesiredSkillNames } from "./skills.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Sleep for a given number of milliseconds.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Create a tmpdir with `.claude/skills/` containing symlinks to skills from
@@ -594,23 +602,89 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   };
 
   try {
-    const initial = await runAttempt(sessionId ?? null);
-    if (
-      sessionId &&
-      !initial.proc.timedOut &&
-      (initial.proc.exitCode ?? 0) !== 0 &&
-      initial.parsed &&
-      isClaudeUnknownSessionError(initial.parsed)
-    ) {
-      await onLog(
-        "stdout",
-        `[paperclip] Claude resume session "${sessionId}" is unavailable; retrying with a fresh session.\n`,
+    const maxAttempts = 3;
+    const retryDelaysMs = [15000, 60000]; // 15s, then 60s
+    let attempt: {
+      proc: RunProcessResult;
+      parsedStream: ReturnType<typeof parseClaudeStreamJson>;
+      parsed: Record<string, unknown> | null;
+    } | null = null;
+
+    for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex++) {
+      attempt = await runAttempt(sessionId ?? null);
+
+      // Check for session retry (existing logic, only on first attempt)
+      if (
+        attemptIndex === 0 &&
+        sessionId &&
+        !attempt.proc.timedOut &&
+        (attempt.proc.exitCode ?? 0) !== 0 &&
+        attempt.parsed &&
+        isClaudeUnknownSessionError(attempt.parsed)
+      ) {
+        await onLog(
+          "stdout",
+          `[paperclip] Claude resume session "${sessionId}" is unavailable; retrying with a fresh session.\n`,
+        );
+        const retry = await runAttempt(null);
+        return toAdapterResult(retry, { fallbackSessionId: null, clearSessionOnMissingSession: true });
+      }
+
+      // Check for org verification error (new retry logic)
+      const hasSessionOutput = Boolean(
+        attempt.parsedStream.sessionId ||
+        (attempt.parsed && Object.keys(attempt.parsed).length > 0)
       );
-      const retry = await runAttempt(null);
-      return toAdapterResult(retry, { fallbackSessionId: null, clearSessionOnMissingSession: true });
+      const isOrgVerificationError =
+        !attempt.proc.timedOut &&
+        (attempt.proc.exitCode ?? 0) !== 0 &&
+        isClaudeOrgVerificationError({
+          stderr: attempt.proc.stderr,
+          hasSessionOutput,
+        });
+
+      // If success or non-retryable error, break
+      if ((attempt.proc.exitCode ?? 0) === 0 || !isOrgVerificationError) {
+        break;
+      }
+
+      // If this is not the last attempt, retry with backoff
+      if (attemptIndex < maxAttempts - 1) {
+        const delayMs = retryDelaysMs[attemptIndex] ?? 60000;
+        await onLog(
+          "stdout",
+          `[paperclip] Claude CLI org verification failed (attempt ${attemptIndex + 1}/${maxAttempts}); retrying after ${delayMs / 1000}s backoff.\n`,
+        );
+        await sleep(delayMs);
+      }
     }
 
-    return toAdapterResult(initial, { fallbackSessionId: runtimeSessionId || runtime.sessionId });
+    if (!attempt) {
+      // This should never happen, but TypeScript needs this
+      throw new Error("No attempt was made");
+    }
+
+    // If we exhausted retries due to org verification error, set the specific error code
+    const hasSessionOutput = Boolean(
+      attempt.parsedStream.sessionId ||
+      (attempt.parsed && Object.keys(attempt.parsed).length > 0)
+    );
+    const finalIsOrgVerificationError =
+      !attempt.proc.timedOut &&
+      (attempt.proc.exitCode ?? 0) !== 0 &&
+      isClaudeOrgVerificationError({
+        stderr: attempt.proc.stderr,
+        hasSessionOutput,
+      });
+
+    const result = toAdapterResult(attempt, { fallbackSessionId: runtimeSessionId || runtime.sessionId });
+
+    // Override error code if retries were exhausted due to org verification failure
+    if (finalIsOrgVerificationError && result.errorCode !== "claude_auth_required") {
+      result.errorCode = "claude_auth_unverified";
+    }
+
+    return result;
   } finally {
     fs.rm(skillsDir, { recursive: true, force: true }).catch(() => {});
   }
