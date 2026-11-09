@@ -28,10 +28,15 @@ import {
   detectClaudeLoginRequired,
   isClaudeMaxTurnsResult,
   isClaudeUnknownSessionError,
+  isClaudeOrgVerificationError,
 } from "./parse.js";
 import { resolveClaudeDesiredSkillNames } from "./skills.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Create a tmpdir with `.claude/skills/` containing symlinks to skills from
@@ -595,6 +600,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   try {
     const initial = await runAttempt(sessionId ?? null);
+
+    // Handle session unavailability
     if (
       sessionId &&
       !initial.proc.timedOut &&
@@ -608,6 +615,54 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       );
       const retry = await runAttempt(null);
       return toAdapterResult(retry, { fallbackSessionId: null, clearSessionOnMissingSession: true });
+    }
+
+    // Handle org verification errors with retry and backoff
+    const hasSessionOutput = initial.parsedStream.sessionId != null || initial.parsed != null;
+    const isOrgVerificationError =
+      !initial.proc.timedOut &&
+      (initial.proc.exitCode ?? 0) !== 0 &&
+      isClaudeOrgVerificationError({
+        stderr: initial.proc.stderr,
+        hasSessionOutput,
+      });
+
+    if (isOrgVerificationError) {
+      const backoffDelays = [15000, 60000]; // 15s, then 60s
+      let lastAttempt = initial;
+
+      for (let i = 0; i < backoffDelays.length; i++) {
+        const delay = backoffDelays[i];
+        await onLog(
+          "stdout",
+          `[paperclip] Claude org verification failed transiently; retrying in ${delay / 1000}s (attempt ${i + 2}/3).\n`,
+        );
+        await sleep(delay);
+
+        const retryAttempt = await runAttempt(sessionId ?? null);
+        const retryHasSessionOutput = retryAttempt.parsedStream.sessionId != null || retryAttempt.parsed != null;
+        const retryIsOrgError =
+          !retryAttempt.proc.timedOut &&
+          (retryAttempt.proc.exitCode ?? 0) !== 0 &&
+          isClaudeOrgVerificationError({
+            stderr: retryAttempt.proc.stderr,
+            hasSessionOutput: retryHasSessionOutput,
+          });
+
+        if (!retryIsOrgError) {
+          // Success or a different error - return this result
+          return toAdapterResult(retryAttempt, { fallbackSessionId: runtimeSessionId || runtime.sessionId });
+        }
+
+        lastAttempt = retryAttempt;
+      }
+
+      // All retries exhausted, return with specific error code
+      const result = toAdapterResult(lastAttempt, { fallbackSessionId: runtimeSessionId || runtime.sessionId });
+      return {
+        ...result,
+        errorCode: "claude_auth_unverified",
+      };
     }
 
     return toAdapterResult(initial, { fallbackSessionId: runtimeSessionId || runtime.sessionId });

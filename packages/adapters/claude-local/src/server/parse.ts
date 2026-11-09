@@ -177,3 +177,12 @@ export function isClaudeUnknownSessionError(parsed: Record<string, unknown>): bo
     /no conversation found with session id|unknown session|session .* not found/i.test(msg),
   );
 }
+
+export function isClaudeOrgVerificationError(input: {
+  stderr: string;
+  hasSessionOutput: boolean;
+}): boolean {
+  // Only match when there's no session output and stderr contains the specific error
+  if (input.hasSessionOutput) return false;
+  return /unable\s+to\s+verify\s+organization/i.test(input.stderr);
+}
