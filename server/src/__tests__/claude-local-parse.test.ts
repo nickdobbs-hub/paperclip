@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isClaudeOrgVerificationError } from "./parse.js";
+import { isClaudeOrgVerificationError } from "@paperclipai/adapter-claude-local/server";
 
 describe("isClaudeOrgVerificationError", () => {
   it("returns true when stderr contains org verification error and no session output", () => {

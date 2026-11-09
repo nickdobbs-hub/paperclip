@@ -1,4 +1,4 @@
-export { execute, runClaudeLogin } from "./execute.js";
+export { execute, runClaudeLogin, setClaudeRetryDelaysForTests } from "./execute.js";
 export { listClaudeSkills, syncClaudeSkills } from "./skills.js";
 export { testEnvironment } from "./test.js";
 export {
@@ -6,6 +6,7 @@ export {
   describeClaudeFailure,
   isClaudeMaxTurnsResult,
   isClaudeUnknownSessionError,
+  isClaudeOrgVerificationError,
 } from "./parse.js";
 export {
   getQuotaWindows,

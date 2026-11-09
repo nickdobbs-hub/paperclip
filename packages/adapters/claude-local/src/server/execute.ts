@@ -38,6 +38,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Test-only seam to override retry delays
+let testClaudeRetryDelays: number[] | null = null;
+export function setClaudeRetryDelaysForTests(delays: number[] | null): void {
+  testClaudeRetryDelays = delays;
+}
+function getClaudeRetryDelays(): number[] {
+  return testClaudeRetryDelays ?? [15000, 60000];
+}
+
 /**
  * Create a tmpdir with `.claude/skills/` containing symlinks to skills from
  * the repo's `skills/` directory, so `--add-dir` makes Claude Code discover
@@ -628,7 +637,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       });
 
     if (isOrgVerificationError) {
-      const backoffDelays = [15000, 60000]; // 15s, then 60s
+      const backoffDelays = getClaudeRetryDelays(); // 15s, then 60s by default
       let lastAttempt = initial;
 
       for (let i = 0; i < backoffDelays.length; i++) {
